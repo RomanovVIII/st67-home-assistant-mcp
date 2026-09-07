@@ -7,7 +7,7 @@
     "": {
       "name": "st67-home-assistant-mcp",
       "version": "0.1.0",
-      "license": "UNLICENSED",
+      "license": "MIT",
       "dependencies": {
         "@modelcontextprotocol/server": "2.0.0",
         "ws": "8.21.3",

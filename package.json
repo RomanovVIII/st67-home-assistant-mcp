@@ -3,11 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "description": "Compact on-demand REST and WebSocket MCP bridge for Home Assistant.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=24 <25" },
-  "bin": { "st67-home-assistant-mcp": "dist/index.js" },
-  "files": ["dist/", "README.md", "npm-shrinkwrap.json"],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "bin": {
+    "st67-home-assistant-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "README.ru.md",
+    "LICENSE",
+    "assets/",
+    "npm-shrinkwrap.json"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
@@ -26,5 +37,16 @@
     "@types/ws": "8.18.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
-  }
+  },
+  "keywords": [
+    "home-assistant",
+    "mcp",
+    "model-context-protocol",
+    "home-automation",
+    "smart-home",
+    "rest-api",
+    "websocket",
+    "typescript",
+    "stdio"
+  ]
 }

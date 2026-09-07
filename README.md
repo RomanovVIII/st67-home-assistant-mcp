@@ -1,16 +1,38 @@
+**English** · [Русский](README.ru.md)
+
+![Studio 67 Home Assistant MCP: local MCP client connected to Home Assistant through REST and WebSocket](assets/home-assistant-mcp-banner.png)
+
 # ST67 Home Assistant MCP
 
-Компактный MCP-мост для работы с Home Assistant по запросу пользователя через REST и WebSocket. Один общий код запускается отдельным процессом для каждого подключения. Постоянного наблюдения, отдельной службы, базы данных и собственного веб-интерфейса нет.
+**Control Home Assistant from an MCP client: read device states, call services, and run configuration commands through REST and WebSocket.**
 
-Версия разработки: **0.1.0**. Локальная реализация; публичный выпуск и лицензия ещё не согласованы. `private: true` и `UNLICENSED` предотвращают случайную публикацию и не являются выбранной открытой лицензией.
+A lightweight, open-source **Home Assistant MCP server** by Studio 67. It runs locally over the Model Context Protocol (MCP), connects to your own Home Assistant on demand, and keeps each installation's configuration separate from the code.
 
-## Требования и установка
+**0.1.0** · Node.js 24 · TypeScript · [MIT license](LICENSE)
 
-- Node.js 24 и npm.
-- Для Keychain — macOS. Источник environment не зависит от Keychain, но Windows/Linux пока не проверены.
-- Доступ к вашему Home Assistant; токен с правами, необходимыми для выбранных операций.
+[Install](#installation) · [Connect your client](#connect-an-mcp-client) · [Tools](#tools) · [Security and scope](#security-and-scope) · [Русская инструкция](README.ru.md)
 
-Из каталога исходников:
+## What you can do
+
+| Your task | How the bridge helps |
+|---|---|
+| Check a temperature or device state | Read Home Assistant states over REST |
+| Turn on a light or activate a scene | Call Home Assistant services |
+| Work with the entity registry | Send supported WebSocket commands |
+| Wait for an event during a task | Collect a bounded number of events within one call |
+| Connect more than one home | Run independent processes with separate settings and credentials |
+
+Three general-purpose tools cover the API instead of adding a separate tool for every device. REST and WebSocket complement each other; available operations depend on your Home Assistant version, integrations, and token permissions.
+
+There is no background monitoring, persistent subscription, database, web dashboard, or separate daemon. The MCP client starts the local process. API connections open when a tool is called.
+
+**Verified:** macOS, registration in Codex, the installed STDIO process through an MCP SDK client, HTTPS and secure WebSocket with Home Assistant 2026.9.1, and a real light switched on and off with state read-back. Other MCP clients and Windows/Linux have not been independently tested.
+
+## Installation
+
+You need **Node.js 24**, npm, access to your Home Assistant, and a token with the permissions required for your tasks. macOS Keychain is supported on macOS. The environment source does not depend on Keychain, but Windows/Linux remain unverified.
+
+Download the repository source, open its directory in Terminal, and run:
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
@@ -19,50 +41,54 @@ npm test
 npm run pack:dry
 ```
 
-`npm test` сначала собирает свежий код, затем запускает проверки. Все HA-данные в тестах синтетические; тесты требуют разрешения на временные loopback HTTP/WS-порты. TLS-тест использует установленный OpenSSL и удаляет созданные временные сертификат и ключ. Настоящий Keychain не читается.
+`npm test` builds fresh code before running tests. Test data is synthetic; tests need temporary loopback HTTP/WS ports. The TLS test requires OpenSSL and removes its temporary certificate and key. Tests do not read your real Keychain.
 
-Зафиксированные зависимости находятся в `npm-shrinkwrap.json`. Этот файл входит и в пакет, поэтому установка runtime из распакованного пакета также воспроизводится через `npm ci`:
+For a separate runtime installation, build a package:
 
 ```sh
 npm run build
 npm pack --ignore-scripts
-# Распакуйте полученный st67-home-assistant-mcp-0.1.0.tgz
-# в отдельный каталог выбранной версии и откройте его папку package.
-npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-node dist/index.js
 ```
 
-Последняя команда запускает STDIO-сервер, ожидающий MCP-клиента. Без настройки он не обращается к HA; доступны статус и понятная ошибка при API-вызове. Команда не является интерактивной консолью. Для постоянного подключения используйте отдельную установленную копию, а не изменяемый рабочий каталог исходников.
+Extract `st67-home-assistant-mcp-0.1.0.tgz` into a separate version directory. Open its `package` directory and install runtime dependencies:
 
-## Ручное подключение через форму MCP
+```sh
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+```
 
-Этот порядок предназначен для клиента с поддержкой локального STDIO. Совпадение названий и состава полей с конкретной версией графического клиента проверяется при подключении; реальная пользовательская форма ещё не пройдена.
+The included `npm-shrinkwrap.json` pins dependencies for both source and packaged installations. Configure your client to run `node` with that installation's `dist/index.js` as its argument. Use an installed copy for everyday operation rather than a changing development checkout.
 
-1. Откройте раздел управления MCP и добавление пользовательского сервера.
-2. Выберите **STDIO**.
-3. Задайте собственное имя, например `home-assistant-example`. Если форма имеет отдельное отображаемое имя, оно может отличаться от технического идентификатора.
-4. В поле команды укажите абсолютный путь к Node.js. Его можно узнать через `command -v node`; на Windows используйте штатное определение пути к установленному Node.js.
-5. В аргументах укажите абсолютный путь к `dist/index.js` установленной копии. Пути с пробелами вводятся одним аргументом по правилам формы, а не одной строкой shell-команды.
-6. Добавьте перечисленные ниже несекретные параметры окружения. Сам токен в форму конфигурации не вставляйте.
-7. Сохраните подключение и выполните предусмотренное клиентом переподключение. Проверьте наличие `ha_status`, `ha_rest`, `ha_ws` и вызовите локальный `ha_status`.
-8. После отдельного разрешения доступа вызовите `ha_rest` с `method: "GET", path: ""`. Это первая проверка настоящей авторизации; `ha_status` действительность токена не подтверждает.
+Running `node dist/index.js` directly starts a STDIO server waiting for an MCP client; it is not an interactive command prompt. Without configuration it provides local status and returns a clear error for API calls without contacting Home Assistant.
 
-Если форма принимает только URL, этот STDIO-вариант через неё не подключается. URL самого HA не является URL MCP-сервера. Сначала требуется решить вопрос совместимого клиента или отдельно согласовать другой транспорт; публичный сервер автоматически не создаётся.
+## Connect an MCP client
 
-Для второго экземпляра повторите процедуру с другим именем, адресом и ссылкой на секрет. Команда Node.js и установленный общий код могут быть одинаковыми. Секреты и процессы экземпляров независимы.
+Your client must support **local STDIO servers**. The following fields were checked against the Codex form; names may differ in other clients. A saved server may require reconnection before its tools appear in the current conversation.
 
-## Настройки и токен
+1. Open your client's MCP settings and add a custom server.
+2. Select **STDIO**.
+3. Choose a name, for example `home-assistant-example`.
+4. Set the command to the absolute path to Node.js. On macOS, `command -v node` shows it; use your platform's equivalent on Windows.
+5. Add the absolute path to the installed `dist/index.js` as one argument. A path containing spaces must remain one argument, following the client's input format.
+6. Add the nonsecret environment settings below. Do not paste the token into ordinary MCP configuration.
+7. Save and reconnect. Check for `ha_status`, `ha_rest`, and `ha_ws`; call `ha_status` first.
+8. With authorization to access your instance, call `ha_rest` with `method: "GET", path: ""`. This verifies actual authentication; `ha_status` alone does not validate a token.
 
-| Параметр | Значение |
+A form accepting only a server URL cannot connect to this STDIO implementation. Your Home Assistant URL is not an MCP server URL.
+
+For another Home Assistant instance, create a separate entry with its own URL and credential reference. The Node executable and installed code can be shared; processes and credentials remain independent.
+
+## Configuration and credentials
+
+| Variable | Purpose |
 |---|---|
-| `HA_BASE_URL` | Корневой URL, например `https://ha.example.invalid`; префикс пути, query и встроенные credentials запрещены |
-| `HA_TOKEN_SOURCE` | `keychain` либо `environment` |
-| `HA_KEYCHAIN_SERVICE` | Для Keychain: выбранное пользователем имя сервиса записи |
-| `HA_KEYCHAIN_ACCOUNT` | Для Keychain: выбранное пользователем имя аккаунта записи |
-| `HA_TOKEN_ENV_NAME` | Для environment: имя уже унаследованной переменной с токеном, не его значение |
-| `HA_ALLOW_HTTP` | Только точное `true` разрешает HTTP/WS без TLS; по умолчанию запрещено |
+| `HA_BASE_URL` | Root URL such as `https://ha.example.invalid`; path prefixes, query strings, and embedded credentials are rejected |
+| `HA_TOKEN_SOURCE` | `keychain` or `environment` |
+| `HA_KEYCHAIN_SERVICE` | Service name of your Keychain item |
+| `HA_KEYCHAIN_ACCOUNT` | Account name of your Keychain item |
+| `HA_TOKEN_ENV_NAME` | Name of an already inherited environment variable containing the token, not the token itself |
+| `HA_ALLOW_HTTP` | Only the exact value `true` allows unencrypted HTTP/WS; disabled by default |
 
-Синтетический пример несекретных полей формы для macOS:
+Synthetic macOS example containing no credentials:
 
 ```text
 HA_BASE_URL=https://ha.example.invalid
@@ -71,103 +97,121 @@ HA_KEYCHAIN_SERVICE=home-assistant-example
 HA_KEYCHAIN_ACCOUNT=mcp-example
 ```
 
-Пользователь самостоятельно создаёт парольную запись macOS Keychain с выбранными service/account и вводит токен в защищённое поле штатного приложения. Мост только читает точную запись через системную утилиту без shell-интерполяции; он не создаёт и не изменяет секреты. Доступ приложения к записи может потребовать подтверждения владельца.
+Create a password item in macOS Keychain using your chosen service/account and enter the token yourself in the application's protected field. The bridge reads that specific item using `/usr/bin/security` without shell interpolation. It does not create or modify credentials. macOS may require the owner's approval.
 
-Для environment секрет должен заранее предоставляться защищённой средой запуска. Указание `HA_TOKEN_ENV_NAME` само по себе переменную не создаёт. Графический клиент может не наследовать окружение Terminal; это проверяется при установке. Не сохраняйте токен в `.env`, JSON, TOML, аргументах запуска, примерах, истории shell или обычной конфигурации MCP.
+### Repeated Keychain prompts
 
-Токен получает только runtime во время API-вызова; агенту не требуется читать или видеть его значение. В JavaScript нельзя гарантировать физическое обнуление каждой копии строки в памяти.
+`ha_status` never reads a token. API calls allow up to 10 seconds to retrieve it. Configure access for the system utility before using the bridge; a one-time **Allow** is not persistent authorization. If **Always Allow** does not resolve repeated prompts, check the specific item's partition list as well as its trusted applications. Do not broaden permissions for the entire keychain or unrelated items.
 
-## Инструменты
+Use Keychain Access's protected field for long tokens. On the tested macOS, the interactive `security add-generic-password -w` input truncated values at 128 characters, making that entry method unsuitable for long Home Assistant tokens. Do not work around it by putting the token in command-line arguments.
+
+`SECRET_UNAVAILABLE` means credential retrieval failed before the API request. If Home Assistant rejects authentication, stop retries and check the token: repeated failed authentication can trigger an IP ban.
+
+### Environment source
+
+Supply the secret through a protected launch environment beforehand. Setting `HA_TOKEN_ENV_NAME` does not create that variable. A graphical client may not inherit your Terminal environment; verify its behavior during setup.
+
+Do not store a token in `.env`, JSON, TOML, examples, launch arguments, shell history, or ordinary MCP configuration. The runtime obtains it during an API call; the assistant does not need its value. JavaScript cannot guarantee physical erasure of every in-memory string copy.
+
+## Tools
 
 ### `ha_status`
 
-Возвращает версию, наличие корректной конфигурации, тип источника токена и отсутствие мониторинга. Не обращается к HA и не читает секрет. При неверных параметрах показывает безопасный код ошибки без адресов и значений.
+Reports the bridge version, whether configuration is valid, the credential source type, and the absence of monitoring. It does not contact Home Assistant or read credentials. Invalid configuration produces a safe error code without exposing values.
 
 ### `ha_rest`
 
-- `method`: `GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`, `PATCH`, `DELETE`. Поддержку сочетания метода и пути определяет ваш HA.
-- `path`: путь относительно `/api/`, например `states` или `services/light/turn_on`. Для `/api/` используйте пустую строку. Начальный `/`, `..`, fragment, query и иной host не принимаются.
-- `query`: необязательный массив пар строк; одинаковые ключи допускаются.
-- `body`: необязательное JSON-значение. Для текстового тела задайте `contentType: "text/plain"` или `"application/yaml"`; по умолчанию используется JSON. У `GET` и `HEAD` тело запрещено.
-- `allowBinary`: по умолчанию `false`. Включать только после явного разрешения пользователя на возврат конкретного бинарного содержимого.
+Calls a supported method under Home Assistant's `/api/`:
 
-Возвращает HTTP-статус, content type, кодировку и тело. Поддерживаются JSON, текст и небольшие бинарные ответы. Бинарные ответы требуют `allowBinary: true`, передаются как base64 и помечаются `binaryUninspected: true`: **их содержимое не считается очищенным от секретов**. Архив или иной контейнер может содержать приватные данные. Дополнительная проверка буквальных байтов текущего токена не гарантирует защиту от его кодирования, сжатия или других секретов.
+- `method`: `GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`, `PATCH`, or `DELETE`. Home Assistant determines which method/path combinations are supported.
+- `path`: relative API path, such as `states` or `services/light/turn_on`. Use `""` for `/api/`. Leading slashes, `..`, fragments, embedded queries, and other hosts are rejected.
+- `query`: optional array of string pairs; repeated keys are allowed.
+- `body`: optional JSON value. For text, specify `contentType: "text/plain"` or `"application/yaml"`; JSON is the default. `GET` and `HEAD` cannot contain a body.
+- `allowBinary`: defaults to `false`; enable only when the user explicitly permits returning the particular binary content.
 
-Синтетические примеры:
+Read a state:
 
 ```json
 {"method":"GET","path":"states/sensor.example"}
 ```
 
+Turn on an explicitly authorized light:
+
 ```json
 {"method":"POST","path":"services/light/turn_on","body":{"entity_id":"light.example"}}
 ```
 
-Изменяющий пример выполняется только по разрешённому поручению и на выбранном пользователем объекте.
+These entity names are placeholders. Select a real target before issuing a write.
+
+Returns HTTP status, content type, encoding, and data. JSON, text, and small binary responses are supported. Opted-in binary data is returned as base64 with `binaryUninspected: true`: **its contents are not guaranteed to be free of secrets**. Literal-token byte checks cannot detect every encoding, compressed secret, or other private value in a container.
 
 ### `ha_ws`
 
-`command` содержит поддерживаемый HA тип команды и её поля. Авторизацию и `id` назначает мост; собственный `id` и служебные auth-сообщения не принимаются.
+Sends a supported Home Assistant `command`. The bridge owns authentication and request IDs; user-supplied IDs and authentication messages are rejected.
 
 ```json
 {"command":{"type":"config/entity_registry/list"}}
 ```
 
-Один вызов открывает соединение, проходит авторизацию, отправляет одну команду, получает результат и закрывает соединение. Ответы `result`, ошибки HA и `pong` обрабатываются явно. Некоторые административные команды требуют прав администратора.
+Each call opens a connection, authenticates, sends one command, receives its result, and closes the socket. Home Assistant errors, result messages, and pong responses are handled explicitly. Some administrative commands require administrator permissions.
 
-Для ограниченного ожидания событий передайте команду подписки, `eventLimit` от 1 до 100 и при необходимости `waitMs` от 1 до 30000. По умолчанию `eventLimit: 0`: ожидания событий нет. При его включении стандартный срок — 5 секунд в пределах общего бюджета вызова.
+To collect events for a particular task, provide a subscription command, `eventLimit` from 1 to 100, and optionally `waitMs` from 1 to 30000. The default `eventLimit: 0` disables event waiting. When enabled, its default duration is five seconds within the overall call deadline.
 
 ```json
 {"command":{"type":"subscribe_events","event_type":"state_changed"},"eventLimit":1,"waitMs":5000}
 ```
 
-Возвращаются результат команды, события и причина завершения. Отсутствие событий до срока — нормальный пустой результат. При обрыве после части событий или превышении суммарного размера результат явно помечается неполным. По окончании вызова соединение и подписка закрываются; ничего не сохраняется для следующего вызова.
+The response includes the command result, events, and completion reason. No events before the deadline is a normal empty result. Interrupted or size-limited event collection is marked incomplete. The connection and subscription end with the call; nothing is retained for a later call.
 
-## Лимиты и ошибки
+## Limits and failures
 
-- Запрос: 1 MiB. Полученный ответ: 2 MiB. Итоговое MCP-представление, включая дублирование и JSON-экранирование: также не более 2 MiB; слишком большой результат заменяется явной ошибкой.
-- Общий срок вызова, включая получение секрета: 30 секунд. WS-авторизация: максимум 10 секунд внутри общего срока.
-- Не более четырёх одновременно активных API-вызовов на экземпляр; пятый получает `BUSY`, очередь не растёт.
-- TLS проверяется; redirect запрещены. Настройки системного DNS и сети мост не меняет.
-- HTTP-ошибки сохраняют статус. JSON и текст очищаются от известного токена, Bearer/JWT и credential-полей; это не универсальный DLP и не гарантия обнаружения произвольно закодированных секретов.
-- Сырые exception, stderr Keychain, заголовки авторизации и полные ответы не журналируются. stdout занят MCP.
-- Отмена, тайм-аут или обрыв после отправки могут оставить результат удалённого действия неизвестным (`resultUnknown`). Автоматического повтора команд нет. Перед повторной записью проверьте фактическое состояние HA.
+- Maximum request: 1 MiB. Raw response: 2 MiB. Final MCP representation, including duplicated content and JSON escaping: 2 MiB. Oversized output becomes an explicit error.
+- Overall call deadline, including credential retrieval: 30 seconds. WebSocket authentication and Keychain retrieval each allow up to 10 seconds within that deadline.
+- Up to four concurrent API calls per process; a fifth receives `BUSY` without an unbounded queue.
+- TLS verification is enabled; redirects are rejected. The bridge does not change DNS or network settings.
+- HTTP errors preserve their status. JSON and text are redacted for the known token, Bearer/JWT patterns, and credential fields. This is not universal data-loss prevention or a guarantee against encoded secrets.
+- Raw exceptions, Keychain stderr, authorization headers, and complete responses are not logged. stdout is reserved for MCP.
+- A timeout, cancellation, or disconnect after sending may leave the remote outcome unknown (`resultUnknown`). Commands are never retried automatically. Read the actual state before retrying a write.
 
-Отключение/отмена клиента закрывает активные соединения. Новый процесс не восстанавливает и не повторяет старые команды.
+Client shutdown or cancellation closes active connections. A new process does not restore or replay previous commands.
 
-## Границы доступа
+## Security and scope
 
-Мост использует API и права предоставленного токена. Он не обходит роли HA, не является песочницей и не предоставляет самостоятельный SSH, доступ к ОС, произвольным файлам или Supervisor. Вызовы доступных сервисов HA могут управлять устройствами и менять настройки; согласование действий остаётся обязанностью клиента и пользователя.
+The bridge acts with your token's Home Assistant permissions. It does not bypass roles, sandbox the remote service, or independently provide SSH, operating-system access, arbitrary file access, or Supervisor access. Calling Home Assistant services can change devices and settings; authorization remains the responsibility of the client and user.
 
-REST и WS дополняют друг друга: свет можно включить HTTP-вызовом, а реестр сущностей настраивается через WS. Создание сущности зависит от интеграции; единой операции «создать любую сущность» нет. Возможности вашей установленной версии и сторонних интеграций проверяются отдельно.
+REST can control a light; WebSocket can manage entity-registry settings. Creating an entity depends on its integration: there is no universal operation to create any entity. Check version-specific and third-party capabilities separately.
 
-Не поддерживаются потоковое видео, SSE, multipart-загрузки, бинарные WS-кадры и общая WS-сессия между несколькими вызовами. Поддержка двух транспортов не означает полного совпадения с интерфейсом HA.
+Streaming video, SSE, multipart uploads, binary WebSocket frames, and shared WebSocket sessions across calls are not supported. Supporting both API transports does not imply complete parity with the Home Assistant interface.
 
-Полученные данные отправляются MCP-клиенту и могут войти в контекст модели и историю разговора. Отсутствие собственного журнала моста не удаляет историю клиента. Никаких автоматических подписок, сообщений в задачи или пробуждения модели нет.
+Returned data reaches the MCP client and may enter model context and conversation history. The absence of bridge logging does not remove client history. There are no automatic event subscriptions, messages to conversations, or model wakeups.
 
-## Обновление, откат и удаление
+## Updates, rollback, and removal
 
-Устанавливайте новую версию в отдельный каталог. После проверки переключите путь запуска MCP на неё. Откат — возвращение пути к предыдущей проверенной установленной версии. На этом этапе публичных релизов и старой выпущенной версии ещё нет.
+Install a new version in a separate directory, verify it, then switch the client's launch path. Rollback means selecting a previously verified installed version. There is no earlier public release available at this initial stage.
 
-Для удаления отключите и удалите нужную запись MCP в клиенте, убедитесь в завершении её процесса и удалите только её установленную копию, если она не используется другим подключением. Удаление записи Keychain и отзыв токена — отдельные подтверждаемые действия пользователя. Исходники, другие подключения и их секреты автоматически не удаляются.
+To uninstall, disable and remove the relevant MCP entry, ensure its process has stopped, and remove only the installed copy if no other entry uses it. Deleting the Keychain item and revoking the token are separate user actions. Other installations, source code, and credentials are not removed automatically.
 
-## Устройство и проверки
+## Development and verification
 
-- `src/config.ts`, `src/secrets.ts` — несекретная конфигурация и ленивое получение токена.
-- `src/rest.ts`, `src/websocket.ts` — REST/WS-протоколы и ограничение данных.
-- `src/bridge.ts`, `src/operation.ts` — время, отмена, конкуренция и закрытие активной работы.
-- `src/redaction.ts`, `src/errors.ts` — очистка ответов и безопасные ошибки.
-- `src/server.ts`, `src/index.ts` — три инструмента MCP и STDIO entrypoint.
-- `tests/` — локальные протокольные имитаторы и тесты без настоящего HA/Keychain.
+- `src/config.ts`, `src/secrets.ts`: nonsecret settings and lazy token retrieval.
+- `src/rest.ts`, `src/websocket.ts`: protocol handling and response limits.
+- `src/bridge.ts`, `src/operation.ts`: deadlines, cancellation, concurrency, and cleanup.
+- `src/redaction.ts`, `src/errors.ts`: redaction and safe failures.
+- `src/server.ts`, `src/index.ts`: three MCP tools and the STDIO entrypoint.
+- `tests/`: synthetic protocol servers and tests; no real Home Assistant or Keychain required.
 
-Матрица Максимального режима: основной REST/WS-обмен, ошибки авторизации, неверные сообщения, пути и redirect, TLS, бинарный opt-in, ограничение сырых и сериализованных ответов, 4 параллельных вызова, отмена и повторная отмена, изоляция профилей, 200 последовательных WS-вызовов, поток 1000 событий при лимите 100, остановка процесса и новый запуск без replay, SDK-клиент через STDIO, чистая установка пакета, независимое ревью и повторная проверка исправлений.
+The implementation passed 70 tests covering REST/WS, authentication failures, malformed messages, paths, redirects, TLS, binary opt-in, raw and serialized limits, concurrency, repeated cancellation, isolated instances, 200 sequential WebSocket calls, 1,000 events capped at 100, process shutdown/restart without replay, and MCP SDK calls over STDIO. Clean package installation and independent review were also completed.
 
-Исходники и тесты не зависят от пользовательских адресов и имён. Реальные подключения и подтверждение работы формы MCP относятся к следующему отдельно согласованному шагу.
+Live testing of the installed bridge verified authenticated reading, WebSocket configuration reading, and an authorized light switched on and off with state read-back. Private connection settings and device data are excluded from this repository.
 
-## Источники
+## License
+
+[MIT](LICENSE), Copyright © 2026 Studio 67. `private: true` in package.json prevents accidental npm publication; it does not restrict source distribution under MIT. This is an independent Studio 67 project, not an official Home Assistant or OpenAI product.
+
+## References
 
 - [Home Assistant REST API](https://developers.home-assistant.io/docs/api/rest/)
 - [Home Assistant WebSocket API](https://developers.home-assistant.io/docs/api/websocket/)
-- [Реестр сущностей](https://github.com/home-assistant/core/blob/dev/homeassistant/components/config/entity_registry.py)
-- [Автоматизации](https://github.com/home-assistant/core/blob/dev/homeassistant/components/config/automation.py)
-- [Настройка MCP-клиента](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+- [Entity registry implementation](https://github.com/home-assistant/core/blob/dev/homeassistant/components/config/entity_registry.py)
+- [Automation implementation](https://github.com/home-assistant/core/blob/dev/homeassistant/components/config/automation.py)
+- [MCP client configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
