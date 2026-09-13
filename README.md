@@ -8,7 +8,7 @@
 
 A lightweight, open-source **Home Assistant MCP server** by Studio 67. It runs locally over the Model Context Protocol (MCP), connects to your own Home Assistant on demand, and keeps each installation's configuration separate from the code.
 
-**0.1.0** · Node.js 24 · TypeScript · [MIT license](LICENSE)
+**0.2.0** · Node.js 24 · TypeScript · [MIT license](LICENSE)
 
 [Install](#installation) · [Connect your client](#connect-an-mcp-client) · [Tools](#tools) · [Security and scope](#security-and-scope) · [Русская инструкция](README.ru.md)
 
@@ -22,7 +22,7 @@ A lightweight, open-source **Home Assistant MCP server** by Studio 67. It runs l
 | Wait for an event during a task | Collect a bounded number of events within one call |
 | Connect more than one home | Run independent processes with separate settings and credentials |
 
-Three general-purpose tools cover the API instead of adding a separate tool for every device. REST and WebSocket complement each other; available operations depend on your Home Assistant version, integrations, and token permissions.
+Three general-purpose tools cover the API; two additional tools preview and apply bounded Lovelace card edits. REST and WebSocket complement each other; available operations depend on your Home Assistant version, integrations, and token permissions.
 
 There is no background monitoring, persistent subscription, database, web dashboard, or separate daemon. The MCP client starts the local process. API connections open when a tool is called.
 
@@ -50,7 +50,7 @@ npm run build
 npm pack --ignore-scripts
 ```
 
-Extract `st67-home-assistant-mcp-0.1.0.tgz` into a separate version directory. Open its `package` directory and install runtime dependencies:
+Extract `st67-home-assistant-mcp-0.2.0.tgz` into a separate version directory. Open its `package` directory and install runtime dependencies:
 
 ```sh
 npm ci --omit=dev --ignore-scripts --no-audit --no-fund
@@ -70,12 +70,42 @@ Your client must support **local STDIO servers**. The following fields were chec
 4. Set the command to the absolute path to Node.js. On macOS, `command -v node` shows it; use your platform's equivalent on Windows.
 5. Add the absolute path to the installed `dist/index.js` as one argument. A path containing spaces must remain one argument, following the client's input format.
 6. Add the nonsecret environment settings below. Do not paste the token into ordinary MCP configuration.
-7. Save and reconnect. Check for `ha_status`, `ha_rest`, and `ha_ws`; call `ha_status` first.
+7. Save and reconnect. Check for `ha_status`, `ha_rest`, `ha_ws`, `ha_lovelace_preview`, and `ha_lovelace_apply`; call `ha_status` first.
 8. With authorization to access your instance, call `ha_rest` with `method: "GET", path: ""`. This verifies actual authentication; `ha_status` alone does not validate a token.
 
 A form accepting only a server URL cannot connect to this STDIO implementation. Your Home Assistant URL is not an MCP server URL.
 
 For another Home Assistant instance, create a separate entry with its own URL and credential reference. The Node executable and installed code can be shared; processes and credentials remain independent.
+
+## Bounded Lovelace card edits
+
+Version 0.2.0 adds `ha_lovelace_preview` (read-only) and `ha_lovelace_apply` (write). They do not change approval policies or replay a rejected action. Review and approve each fresh apply separately; if that review rejects it, stop. The helper does not evaluate JavaScript, templates or arbitrary editing code.
+
+Preview one existing card using explicit operations:
+
+```json
+{"dashboard":"example-dashboard","cardPath":["views",0,"sections",1,"cards",0],"operations":[{"op":"replace","path":["name"],"value":"New title"}]}
+```
+
+`dashboard: null` selects the default dashboard. `cardPath` starts with `views, index`, optionally `sections, index`, then `cards, index`; nested `card` and `cards, index` are allowed. Other dashboard/view/section paths are rejected. Each operation has a nonempty path relative to this one card. `replace` and `remove` require an existing element; `add` requires a missing object property or a valid array insertion index. Parents must already exist. Only `add`, `replace`, and `remove` are accepted; no move, copy, wildcards or code execution. The resulting card must retain a nonempty string `type`.
+
+Preview returns the complete card `before` and `after`, the exact operations, `expectedVersion` (SHA-256 of the complete canonical dashboard), and `previewHash` (bound to instance, version, target, operations and card contents). These are content identifiers, not authorization tokens. A preview containing redacted content or exceeding its review budget is refused, never silently shortened. Adjacent cards and global templates are neither returned nor changed.
+
+For apply, copy **the same dashboard, cardPath and operations** and add the two returned hashes:
+
+```json
+{"dashboard":"example-dashboard","cardPath":["views",0,"sections",1,"cards",0],"operations":[{"op":"replace","path":["name"],"value":"New title"}],"expectedVersion":"<expectedVersion from preview>","expectedPreviewHash":"<previewHash from preview>","acknowledgeNonAtomicSave":true}
+```
+
+Replace the explanatory hash placeholders with the actual 64-character hashes. Apply reads the complete dashboard, checks both hashes, reads again immediately before writing, and verifies the complete result afterwards. A stale dashboard is rejected even when another editor changed a neighboring card. Successful output includes `verified: true` and the resulting version. An explicit HA refusal returns `DASHBOARD_SAVE_REJECTED`; an uncertain write or failed readback carries `resultUnknown: true`. Do not retry it automatically or restore old data over a later edit. Inspect the current state before deciding a new action.
+
+**Not atomic:** Home Assistant's official `lovelace/config/save` saves the **entire dashboard** and provides no compare-and-swap/expected-version parameter. Another client can change it between the final read and save; this race can overwrite that change and readback cannot always detect it. Pause other dashboard editors before applying. The required acknowledgement exposes this limitation. The per-dashboard lock covers only this bridge instance, including competing generic save/delete calls; other processes and HA UI are not locked. These helpers do not guarantee conflict-free updates.
+
+Limits: one existing card; at most 16 operations; 32,000 bytes of input; 65,536 UTF-8 JSON bytes each for before/after (64 KiB; conditional on the total review budget); 160,000 bytes for the complete serialized MCP preview; depth 64 and 150,000 JSON nodes. The existing 1 MiB save-request and 2 MiB response limits still apply to the **whole dashboard**. The total preview is measured after serializing both MCP text and structuredContent, including JSON escaping, operations, hashes and warning fields. A 64 KiB card is not guaranteed to fit: similar-sized before/after alone can exceed 160,000 bytes once duplicated. `CARD_TOO_LARGE` means an individual card exceeds 64 KiB; `PREVIEW_TOO_LARGE` means the full review exceeds its independent budget. Nothing is truncated. Input (including apply hashes and acknowledgement) remains capped at 32,000 bytes; the bridge also measures the actual whole-dashboard save request against 1 MiB. These budgets do not guarantee acceptance by a client approval system. A large dashboard with a reviewable card can work, but an oversized card, review or full save is refused. Credentials remain inside the runtime; the token provider and generic tools retain their behavior. YAML-mode saving is not supported by HA.
+
+Validation includes a synthetic dashboard larger than 200 KB, exact preservation of neighboring cards/templates, stale versions and preview tampering, invalid paths, redaction and size limits, save rejection, readback mismatch, disconnect/unknown outcome, competing writes, and end-to-end STDIO preview/apply. Passing tests do not establish visual correctness of a particular dashboard.
+
+Official behavior checked against [HA WebSocket handlers](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/components/lovelace/websocket.py) and [storage dashboard implementation](https://github.com/home-assistant/core/blob/2026.9.1/homeassistant/components/lovelace/dashboard.py); Context7 did not establish an additional CAS API.
 
 ## Configuration and credentials
 
@@ -187,7 +217,7 @@ Returned data reaches the MCP client and may enter model context and conversatio
 
 ## Updates, rollback, and removal
 
-Install a new version in a separate directory, verify it, then switch the client's launch path. Rollback means selecting a previously verified installed version. There is no earlier public release available at this initial stage.
+Install a new version in a separate directory, verify it, then switch the client's launch path. Rollback means selecting a previously verified installed version. The previous 0.1.0 baseline is preserved in GitHub Release v0.1.0 with an installable archive and SHA256SUMS. Keep a verified rollback installation during candidate acceptance; permanent release archives belong on GitHub.
 
 To uninstall, disable and remove the relevant MCP entry, ensure its process has stopped, and remove only the installed copy if no other entry uses it. Deleting the Keychain item and revoking the token are separate user actions. Other installations, source code, and credentials are not removed automatically.
 
@@ -197,7 +227,8 @@ To uninstall, disable and remove the relevant MCP entry, ensure its process has 
 - `src/rest.ts`, `src/websocket.ts`: protocol handling and response limits.
 - `src/bridge.ts`, `src/operation.ts`: deadlines, cancellation, concurrency, and cleanup.
 - `src/redaction.ts`, `src/errors.ts`: redaction and safe failures.
-- `src/server.ts`, `src/index.ts`: three MCP tools and the STDIO entrypoint.
+- `src/lovelace.ts`: bounded card preview/apply, canonical hashes, pre-write checks and readback.
+- `src/server.ts`, `src/index.ts`: five MCP tools and the STDIO entrypoint.
 - `tests/`: synthetic protocol servers and tests; no real Home Assistant or Keychain required.
 
 The implementation passed 70 tests covering REST/WS, authentication failures, malformed messages, paths, redirects, TLS, binary opt-in, raw and serialized limits, concurrency, repeated cancellation, isolated instances, 200 sequential WebSocket calls, 1,000 events capped at 100, process shutdown/restart without replay, and MCP SDK calls over STDIO. Clean package installation and independent review were also completed.

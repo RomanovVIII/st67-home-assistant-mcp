@@ -1,6 +1,6 @@
 {
   "name": "st67-home-assistant-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Compact on-demand REST and WebSocket MCP bridge for Home Assistant.",
   "license": "MIT",
@@ -17,7 +17,8 @@
     "README.ru.md",
     "LICENSE",
     "assets/",
-    "npm-shrinkwrap.json"
+    "npm-shrinkwrap.json",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

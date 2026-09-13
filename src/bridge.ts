@@ -1,3 +1,4 @@
+import { applyLovelace, parseLovelace, previewLovelace } from './lovelace.js';
 import type { Config } from './config.js';
 import { BridgeError } from './errors.js';
 import { DEFAULT_LIMITS, type Limits, type Operation } from './operation.js';
@@ -10,12 +11,32 @@ export class HaBridge {
   readonly #active=new Set<AbortController>();
   readonly #limits:Limits;
   #closed=false;
+  readonly #dashboardWrites=new Set<string>();
   constructor(readonly config:Config, readonly tokenProvider:TokenProvider, limits:Partial<Limits>={}) {
     this.#limits={...DEFAULT_LIMITS,...limits};
     if(Object.values(this.#limits).some(v=>!Number.isSafeInteger(v)||v<=0))throw new BridgeError('INVALID_LIMITS');
   }
   rest(input:unknown,signal?:AbortSignal):Promise<RestResult> {return this.#call((token,op)=>requestRest(this.config,input,token,op),signal);}
-  ws(input:unknown,signal?:AbortSignal):Promise<WsResult> {return this.#call((token,op)=>requestWebSocket(this.config,input,token,op),signal);}
+  async ws(input:unknown,signal?:AbortSignal):Promise<WsResult> {
+    const command=(input as {command?:{type?:unknown;url_path?:unknown}}|null)?.command;
+    const write=command?.type==='lovelace/config/save'||command?.type==='lovelace/config/delete';
+    const key=JSON.stringify(command?.url_path??null);
+    if(write&&this.#dashboardWrites.has(key))throw new BridgeError('DASHBOARD_BUSY');
+    if(write)this.#dashboardWrites.add(key);
+    try{return await this.#call((token,op)=>requestWebSocket(this.config,input,token,op),signal);}
+    finally{if(write)this.#dashboardWrites.delete(key);}
+  }
+  async lovelacePreview(input:unknown,signal?:AbortSignal) {
+    const parsed=parseLovelace(input,false);
+    return this.#call((token,op)=>previewLovelace(this.config,parsed,token,op),signal);
+  }
+  async lovelaceApply(input:unknown,signal?:AbortSignal) {
+    const parsed=parseLovelace(input,true),key=JSON.stringify(parsed.dashboard);
+    if(this.#dashboardWrites.has(key))throw new BridgeError('DASHBOARD_BUSY');
+    this.#dashboardWrites.add(key);
+    try{return await this.#call((token,op)=>applyLovelace(this.config,parsed,token,op),signal);}
+    finally{this.#dashboardWrites.delete(key);}
+  }
   close():void {this.#closed=true;for(const controller of this.#active)controller.abort();}
   async #call<T>(execute:(token:string,op:Operation)=>Promise<T>,signal?:AbortSignal):Promise<T> {
     if(this.#closed)throw new BridgeError('BRIDGE_CLOSED');
